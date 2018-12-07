@@ -1,0 +1,13 @@
+{
+    "name": "hashbangcode/config_split_merge",
+    "description": "Merges configuration directories into a single structure.",
+    "type": "library",
+    "license": "GPL-2.0-or-later",
+    "authors": [
+        {
+            "name": "Philip Norton",
+            "email": "philipnorton42@gmail.com"
+        }
+    ],
+    "require": {}
+}
