@@ -2,6 +2,7 @@
     "name": "hashbangcode/config_split_merge",
     "description": "Merges configuration directories into a single structure.",
     "type": "library",
+    "keywords": ["drupal", "config_split"],
     "license": "GPL-2.0-or-later",
     "authors": [
         {
@@ -9,5 +10,17 @@
             "email": "philipnorton42@gmail.com"
         }
     ],
-    "require": {}
+    "autoload": {
+      "psr-4": {
+        "ConfigSplitMerge\\": "src/",
+        "ConfigSplitMergeTests\\": "tests/src/"
+      }
+    },
+    "require": {
+        "symfony/console": "^4.2",
+        "symfony/finder": "^4.2"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^7.5"
+    }
 }
