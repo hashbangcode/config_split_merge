@@ -17,7 +17,11 @@ class ConfigSplitMergeTest extends TestCase
 
         $command = $application->find('drupal:config_split_merge');
         $commandTester = new CommandTester($command);
-        $commandTester->execute([]);
+        $commandTester->execute([
+          'parent' => 'one',
+          'sibling' => 'two',
+          '--config' => 'three',
+        ]);
 
         // the output of the command in the console
         $output = $commandTester->getDisplay();
