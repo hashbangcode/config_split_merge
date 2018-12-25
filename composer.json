@@ -17,10 +17,13 @@
       }
     },
     "require": {
-        "symfony/console": "^4.2",
+        "drupal/core": "^8.6",
         "symfony/finder": "^4.2"
     },
     "require-dev": {
         "phpunit/phpunit": "^7.5"
-    }
+    },
+    "bin": [
+      "bin/config_split_merge"
+    ]
 }
