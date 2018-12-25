@@ -1,0 +1,15 @@
+uuid: 72375074-bb72-4eca-8027-dc9bf7c2952c
+langcode: en
+status: false
+dependencies: {  }
+id: parent
+label: 'The Parent'
+description: ''
+folder: ../config/parent
+module: {  }
+theme: {  }
+blacklist: {  }
+graylist: {  }
+graylist_dependents: true
+graylist_skip_equal: true
+weight: 0
