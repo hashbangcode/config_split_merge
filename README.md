@@ -24,7 +24,7 @@ Just install the tool using composer into your Drupal codebase.
 
 Once you have used it you can then remove the tool from your site.
 
-    composer remove hashbangcode/config_split_merge
+    composer remove --dev hashbangcode/config_split_merge
 
 Setup
 -----
