@@ -57,7 +57,7 @@ class ConfigSplitMerge extends Command
   /**
    * The children config directories.
    *
-   * @var string
+   * @var array
    */
   protected $childrenConfig;
 
@@ -76,6 +76,12 @@ class ConfigSplitMerge extends Command
       ->addOption('dry-run', 'd', InputOption::VALUE_NONE, 'Dry run.');
   }
 
+  /**
+   * Extract the input of the command and convert this to object properties.
+   *
+   * @param InputInterface $input
+   *   The input object.
+   */
   protected function extractAndSetOptions($input) {
     if ($input->hasOption('config')) {
       $this->configDirectory = $input->getOption('config');
@@ -92,7 +98,26 @@ class ConfigSplitMerge extends Command
     $this->dryRun = $input->getOption('dry-run');
 
     $this->parentConfig = $input->getArgument('parent');
-    $this->childrenConfig = $input->getArgument('children');
+    $this->childrenConfig = $this->extractChildren($input->getArgument('children'));
+  }
+
+  /**
+   * Extract the children parameter into an array.
+   *
+   * @param string $children
+   *   The comma separated list of children.
+   *
+   * @return array
+   *   The extracted list of children.
+   */
+  public function extractChildren($children) {
+    $children = explode(',', $children);
+    $children = array_filter($children);
+    foreach ($children as $id => $child) {
+      $children[$id] = trim($child);
+    }
+    sort($children);
+    return $children;
   }
 
   /**
@@ -110,16 +135,13 @@ class ConfigSplitMerge extends Command
     $this->extractAndSetOptions($input);
 
     if ($this->dryRun) {
-      $output->writeln('<comment>Performing dry run.</comment>');
+      $output->writeln('<comment>Performing dry run. No files will be changed.</comment>');
     }
 
     $destinationDirectory = $this->configDirectory . '/default';
 
     $parentDirectory = $this->configDirectory . '/' . $this->parentConfig;
-    $childrenDirectory = $this->configDirectory . '/' . $this->childrenConfig;
-
     $parentConfigSplitFile = $destinationDirectory . '/config_split.config_split.' . $this->parentConfig . '.yml';
-    $childrenConfigSplitFile = $destinationDirectory . '/config_split.config_split.' . $this->childrenConfig . '.yml';
 
     if (!file_exists($parentDirectory)) {
       $output->writeln('<error>Parent directory ' . $parentDirectory . ' does not exist.</error>');
@@ -127,90 +149,104 @@ class ConfigSplitMerge extends Command
       return 1;
     }
 
-    // Set up the config type lists.
+    // Load all of the files in the parent directory to check them.
+    $parentFiles = array_diff(scandir($parentDirectory), array('..', '.'));
+
+    // Set up the config type lists for parent.
     $parentBlacklist = [];
     $parentGraylist = [];
-    $childrenBlacklist = [];
-    $childrenGraylist = [];
 
-    // Load all of the files in the parent directory to check them.
-    $files = array_diff(scandir($parentDirectory), array('..', '.'));
+    foreach ($this->childrenConfig as $childConfig) {
+      $childDirectory = $this->configDirectory . '/' . $childConfig;
+      $childConfigSplitFile = $destinationDirectory . '/config_split.config_split.' . $childConfig . '.yml';
 
-    foreach ($files as $filename) {
-      // Check to see if we have a yml file.
-      if (strstr($filename, '.yml') !== FALSE) {
+      // Set up the config type lists for parent this child.
+      $childBlacklist = [];
+      $childGraylist = [];
 
-        // Extract the configuration name.
-        $configName = str_replace('.yml', '', $filename);
+      foreach ($parentFiles as $filename) {
+        // Check to see if we have a yml file.
+        if (strstr($filename, '.yml') !== FALSE) {
+          // Extract the configuration item name.
+          $configName = str_replace('.yml', '', $filename);
 
-        if (file_exists($childrenDirectory . '/' . $filename)) {
-          // File also exists in the children directory.
-          // Get the contents of both of the files.
-          $parentFileContents = file_get_contents($parentDirectory . '/' . $filename);
-          $parentArray = Yaml::decode($parentFileContents);
-          $childrenFileContents = file_get_contents($childrenDirectory . '/' . $filename);
-          $childrenArray = Yaml::decode($childrenFileContents);
+          if (file_exists($childDirectory . '/' . $filename) && file_exists($parentDirectory . '/' . $filename)) {
+            // File also exists in the children directory.
+            // Get the contents of both of the files.
+            $parentConfigItemFileContents = file_get_contents($parentDirectory . '/' . $filename);
+            $parentArray = Yaml::decode($parentConfigItemFileContents);
+            $childConfigItemFileContents = file_get_contents($childDirectory . '/' . $filename);
+            $childConfigItemArray = Yaml::decode($childConfigItemFileContents);
 
-          // Calculate the difference between the two files.
-          $difference = \Drupal\Component\Utility\DiffArray::diffAssocRecursive($parentArray, $childrenArray);
+            // Calculate the difference between the two files.
+            $difference = \Drupal\Component\Utility\DiffArray::diffAssocRecursive($parentArray, $childConfigItemArray);
 
-          if (count($difference) == 1 && isset($difference['uuid'])) {
-            // If we have exactly 1 difference and that difference is the uuid then process it.
-            // Extract the uuid from the parent and write this to a file.
-            $uuid = $parentArray['uuid'];
+            if (count($difference) == 1 && isset($difference['uuid'])) {
+              // If we have exactly 1 difference and that difference is the uuid then process it.
+              // Extract the uuid from the parent and write this to a file.
+              $uuid = $parentArray['uuid'];
 
-            $updateUuidList[$configName] = $uuid;
-            if (!$this->dryRun) {
+              $updateUuidList[$configName] = $uuid;
+              if (!$this->dryRun) {
+                // Copy the parent file to the destination directory.
+                copy($parentDirectory . '/' . $filename, $destinationDirectory . '/' . $filename);
+
+                // Delete both of the files.
+                unlink($parentDirectory . '/' . $filename);
+                unlink($childDirectory . '/' . $filename);
+              }
+            }
+            elseif (count($difference) > 0 && !isset($difference['uuid'])) {
+              // This is not a uuid change and as it's different we just need to gray list and copy this version to
+              // the default config.
+              $parentGraylist[] = $configName;
+              $childGraylist[] = $configName;
+              if (!$this->dryRun) {
+                copy($parentDirectory . '/' . $filename, $destinationDirectory . '/' . $filename);
+              }
+            }
+            elseif (count($difference) == 0) {
+              // If we have exactly no difference between the two files then just move it.
               // Copy the parent file to the destination directory.
-              copy($parentDirectory . '/' . $filename, $destinationDirectory . '/' . $filename);
+              if (!$this->dryRun) {
+                copy($parentDirectory . '/' . $filename, $destinationDirectory . '/' . $filename);
 
-              // Delete both of the files.
-              unlink($parentDirectory . '/' . $filename);
-              unlink($childrenDirectory . '/' . $filename);
-            }
-          } elseif (count($difference) > 0 && !isset($difference['uuid'])) {
-            // This is not a uuid change and as it's different we just need to gray list and copy this version to
-            // the default config.
-            $parentGraylist[] = $configName;
-            $childrenGraylist[] = $configName;
-            if (!$this->dryRun) {
-              copy($parentDirectory . '/' . $filename, $destinationDirectory . '/' . $filename);
-            }
-          } elseif (count($difference) == 0) {
-            // If we have exactly no difference between the two files then just move it.
-            // Copy the parent file to the destination directory.
-            if (!$this->dryRun) {
-              copy($parentDirectory . '/' . $filename, $destinationDirectory . '/' . $filename);
-
-              // Delete both of the files.
-              unlink($parentDirectory . '/' . $filename);
-              unlink($childrenDirectory . '/' . $filename);
+                // Delete both of the files.
+                unlink($parentDirectory . '/' . $filename);
+                unlink($childDirectory . '/' . $filename);
+              }
             }
           }
-        } else {
-          // Config doesn't exist in children, make sure it doesn't also exist in the default configuration.
-          if (!file_exists($destinationDirectory . '/' . $filename)) {
-            // Add it to blacklist.
-            $parentBlacklist[] = $configName;
+          else {
+            // Config doesn't exist in child, make sure it doesn't also exist in the default configuration.
+            if (!file_exists($destinationDirectory . '/' . $filename)) {
+              // Add it to blacklist.
+              $parentBlacklist[] = $configName;
+            }
           }
         }
       }
-    }
 
-    // Run the same checks on the children directory.
-    $files = array_diff(scandir($childrenDirectory), array('..', '.'));
 
-    foreach ($files as $filename) {
-      // Check to see if we have a yml file.
-      if (strstr($filename, '.yml') !== FALSE) {
-        // Extract the configuration name.
-        $configName = str_replace('.yml', '', $filename);
+      // Run the same checks on the child directory.
+      $files = array_diff(scandir($childDirectory), array('..', '.'));
 
-        if (!file_exists($parentDirectory . '/' . $filename)) {
-          if (!file_exists($destinationDirectory . '/' . $filename)) {
-            $childrenBlacklist[] = $configName;
+      foreach ($files as $filename) {
+        // Check to see if we have a yml file.
+        if (strstr($filename, '.yml') !== FALSE) {
+          // Extract the configuration name.
+          $configName = str_replace('.yml', '', $filename);
+
+          if (!file_exists($parentDirectory . '/' . $filename)) {
+            if (!file_exists($destinationDirectory . '/' . $filename)) {
+              $childBlacklist[] = $configName;
+            }
           }
         }
+      }
+
+      if (count($childBlacklist) > 0 || count($childGraylist) > 0) {
+        $this->updateConfigurationSplitFile($childConfigSplitFile, $childBlacklist, $childGraylist);
       }
     }
 
@@ -219,12 +255,8 @@ class ConfigSplitMerge extends Command
       $this->updateConfigurationSplitFile($parentConfigSplitFile, $parentBlacklist, $parentGraylist);
     }
 
-    if (count($childrenBlacklist) > 0 || count($childrenGraylist) > 0) {
-      $this->updateConfigurationSplitFile($childrenConfigSplitFile, $childrenBlacklist, $childrenGraylist);
-    }
-
+    // Set the update uuid list and generate the hook.
     $this->setUpdateUuidList($updateUuidList);
-
     $updateHook = $this->generateUpdateHook();
 
     if ($this->updateHookFile == FALSE) {

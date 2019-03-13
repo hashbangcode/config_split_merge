@@ -2,10 +2,10 @@ uuid: 72375074-bb72-4eca-8027-dc9bf7c2952c
 langcode: en
 status: false
 dependencies: {  }
-id: child
-label: 'The Child'
+id: child2
+label: 'The Child 2'
 description: ''
-folder: ../config/child
+folder: ../config/child2
 module: {  }
 theme: {  }
 blacklist: {  }
