@@ -17,6 +17,11 @@ use Drupal\Core\Serialization\Yaml;
  */
 class ConfigSplitMerge extends Command
 {
+  /**
+   * The name of the command.
+   *
+   * @var string
+   */
   protected static $defaultName = 'drupal:config_split_merge';
 
   /**
@@ -60,6 +65,20 @@ class ConfigSplitMerge extends Command
    * @var array
    */
   protected $childrenConfig;
+
+  /**
+   * The list of configuration files that need to be deleted.
+   *
+   * @var array
+   */
+  protected $filesToDelete;
+
+  /**
+   * The list of configuration files that need to be copied.
+   *
+   * @var array
+   */
+  protected $filesToCopy;
 
   /**
    * Configure the command.
@@ -138,6 +157,10 @@ class ConfigSplitMerge extends Command
       $output->writeln('<comment>Performing dry run. No files will be changed.</comment>');
     }
 
+    if ($output->isVerbose()) {
+      $output->writeln('<comment>Verbose mode is on!</comment>');
+    }
+
     $destinationDirectory = $this->configDirectory . '/default';
 
     $parentDirectory = $this->configDirectory . '/' . $this->parentConfig;
@@ -187,34 +210,29 @@ class ConfigSplitMerge extends Command
               $uuid = $parentArray['uuid'];
 
               $updateUuidList[$configName] = $uuid;
-              if (!$this->dryRun) {
-                // Copy the parent file to the destination directory.
-                copy($parentDirectory . '/' . $filename, $destinationDirectory . '/' . $filename);
+
+              // Copy the parent file to the destination directory.
+              $this->addCopyFile($parentDirectory . '/' . $filename, $destinationDirectory . '/' . $filename);
 
                 // Delete both of the files.
-                unlink($parentDirectory . '/' . $filename);
-                unlink($childDirectory . '/' . $filename);
-              }
+              $this->filesToDelete[] = $parentDirectory . '/' . $filename;
+              $this->filesToDelete[] = $childDirectory . '/' . $filename;
             }
             elseif (count($difference) > 0 && !isset($difference['uuid'])) {
               // This is not a uuid change and as it's different we just need to gray list and copy this version to
               // the default config.
               $parentGraylist[] = $configName;
               $childGraylist[] = $configName;
-              if (!$this->dryRun) {
-                copy($parentDirectory . '/' . $filename, $destinationDirectory . '/' . $filename);
-              }
+              $this->addCopyFile($parentDirectory . '/' . $filename, $destinationDirectory . '/' . $filename);
             }
             elseif (count($difference) == 0) {
               // If we have exactly no difference between the two files then just move it.
               // Copy the parent file to the destination directory.
-              if (!$this->dryRun) {
-                copy($parentDirectory . '/' . $filename, $destinationDirectory . '/' . $filename);
+              $this->addCopyFile($parentDirectory . '/' . $filename, $destinationDirectory . '/' . $filename);
 
-                // Delete both of the files.
-                unlink($parentDirectory . '/' . $filename);
-                unlink($childDirectory . '/' . $filename);
-              }
+              // Delete both of the files.
+              $this->filesToDelete[] = $parentDirectory . '/' . $filename;
+              $this->filesToDelete[] = $childDirectory . '/' . $filename;
             }
           }
           else {
@@ -226,7 +244,6 @@ class ConfigSplitMerge extends Command
           }
         }
       }
-
 
       // Run the same checks on the child directory.
       $files = array_diff(scandir($childDirectory), array('..', '.'));
@@ -245,13 +262,26 @@ class ConfigSplitMerge extends Command
         }
       }
 
-      if (count($childBlacklist) > 0 || count($childGraylist) > 0) {
+      if (count($childBlacklist) > 0 || count($childGraylist) > 0 && !$this->dryRun) {
         $this->updateConfigurationSplitFile($childConfigSplitFile, $childBlacklist, $childGraylist);
       }
     }
 
+    if ($output->isVerbose()) {
+      $output->writeln(print_r($this->filesToDelete));
+      $output->writeln(print_r($this->filesToCopy));
+    }
+
+    if (!$this->dryRun) {
+      // We have finished analysis of the config files, perform any file
+      // operations. We only do this if this is NOT a dry run. The copy
+      // operation must happen first.
+      $this->copyConfigFiles();
+      $this->deleteConfigFiles();
+    }
+
     // Export the data to our config split files.
-    if (count($parentBlacklist) > 0 || count($parentGraylist) > 0) {
+    if (count($parentBlacklist) > 0 || count($parentGraylist) > 0 && !$this->dryRun) {
       $this->updateConfigurationSplitFile($parentConfigSplitFile, $parentBlacklist, $parentGraylist);
     }
 
@@ -261,12 +291,47 @@ class ConfigSplitMerge extends Command
 
     if ($this->updateHookFile == FALSE) {
       $output->writeln($updateHook);
-    } else {
+    }
+    else {
       file_put_contents($this->updateHookFile, implode(PHP_EOL, $updateHook));
     }
 
     $output->writeln('<info>Done</info>');
     return 0;
+  }
+
+  /**
+   * Helper function to delete config files.
+   */
+  protected function deleteConfigFiles()
+  {
+    foreach ($this->filesToDelete as $file) {
+      if (file_exists($file)) {
+        unlink($file);
+      }
+    }
+  }
+
+  /**
+   * Helper function to copy config files.
+   */
+  protected function copyConfigFiles()
+  {
+    foreach ($this->filesToCopy as $file) {
+      if (file_exists($file['source'])) {
+        copy($file['source'], $file['destination']);
+      }
+    }
+  }
+
+  /**
+   * Helper function to allow the easy update of the copy array.
+   */
+  protected function addCopyFile($source, $destination) {
+    $this->filesToCopy[] = [
+      'source' => $source,
+      'destination' => $destination,
+    ];
   }
 
   /**
