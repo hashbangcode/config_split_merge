@@ -23,7 +23,7 @@ class ConfigSplitMergeTest extends TestCase
       $commandTester = new CommandTester($command);
       $commandTester->execute([
         'parent' => 'foo',
-        'sibling' => 'bar',
+        'children' => 'bar',
         '--config' => __DIR__ . '/data/monkey',
       ]);
 
@@ -61,7 +61,7 @@ class ConfigSplitMergeTest extends TestCase
     $commandTester = new CommandTester($command);
     $commandTester->execute([
       'parent' => 'parent',
-      'sibling' => 'sibling',
+      'children' => 'child',
       '--config' => __DIR__ . '/data/config',
     ]);
 
@@ -73,15 +73,15 @@ class ConfigSplitMergeTest extends TestCase
     $this->assertEquals(0, $statusCode);
 
     $this->assertFileExists(__DIR__ . '/data/config/default/config_split.config_split.parent.yml');
-    $this->assertFileExists(__DIR__ . '/data/config/default/config_split.config_split.sibling.yml');
+    $this->assertFileExists(__DIR__ . '/data/config/default/config_split.config_split.child.yml');
     $this->assertFileExists(__DIR__ . '/data/config/default/node.type.landing_page.yml');
 
     $this->assertFileNotExists(__DIR__ . '/data/config/parent/node.type.landing_page.yml');
     $this->assertFileExists(__DIR__ . '/data/config/parent/node.type.page.yml');
     $this->assertFileExists(__DIR__ . '/data/config/parent/system.site.yml');
 
-    $this->assertFileNotExists(__DIR__ . '/data/config/sibling/node.type.landing_page.yml');
-    $this->assertFileExists(__DIR__ . '/data/config/sibling/system.site.yml');
+    $this->assertFileNotExists(__DIR__ . '/data/config/child/node.type.landing_page.yml');
+    $this->assertFileExists(__DIR__ . '/data/config/child/system.site.yml');
 
     $this->assertContains("'node.type.landing_page' => '2034e796-4d2c-43f0-9135-1afc93052380',", $output, '');
 
@@ -90,7 +90,7 @@ class ConfigSplitMergeTest extends TestCase
     $configSplit = Yaml::decode($configSplitFileContents);
     $this->assertEquals($configSplit['blacklist'][0], 'node.type.page');
 
-    $configSplitFile = __DIR__ . '/data/config/default/config_split.config_split.sibling.yml';
+    $configSplitFile = __DIR__ . '/data/config/default/config_split.config_split.child.yml';
     $configSplitFileContents = file_get_contents($configSplitFile);
     $configSplit = Yaml::decode($configSplitFileContents);
     $this->assertFalse(isset($configSplit['blacklist'][0]));
