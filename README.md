@@ -88,6 +88,8 @@ added to the install profile or module of your choice. This update should be run
     
 You can get the tool to put this output in a file with the --update-hook-file flag.
 
+Once the tool has run you will need to import and export the configuration to ensure all sites are set up correctly.
+
 Arguments
 ---------
 
