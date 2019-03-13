@@ -1,0 +1,12 @@
+uuid: cba9b64f2efd-3f0b-deb4-c3ba-701259a0
+name: 'Child 1 Site'
+mail: example@example.com
+slogan: ''
+page:
+  403: ''
+  404: ''
+  front: 'node/1'
+admin_compact_mode: false
+weight_select_max: 100
+langcode: en
+default_langcode: en

@@ -12,6 +12,39 @@ class ConfigSplitMergeTest extends TestCase
 {
 
   /**
+   * Test that the child extraction function works correctly.
+   *
+   * @dataProvider extractChildrenDataProvider
+   */
+  public function testExtractChildren($childString, $childArray) {
+    $configSplitMerge = new ConfigSplitMerge();
+    $childExtractResult = $configSplitMerge->extractChildren($childString);
+    $this->assertIsArray($childExtractResult);
+    $this->assertEquals(count($childArray), count($childExtractResult));
+    $this->assertEquals($childArray, $childExtractResult);
+  }
+
+  /**
+   * Data provider for testExtractChildren().
+   *
+   * @see testExtractChildren
+   *
+   * @return array
+   *   The array of data.
+   */
+  public function extractChildrenDataProvider() {
+    return [
+      ['child', ['child']],
+      ['child1,child2', ['child1', 'child2']],
+      ['child2,child1', ['child1', 'child2']],
+      ['child1, child2', ['child1', 'child2']],
+      ['child1 , child2', ['child1', 'child2']],
+      ['child1,child2,child3', ['child1', 'child2', 'child3']],
+      ['child1,,,,,,,,,child2', ['child1', 'child2']],
+    ];
+  }
+
+  /**
    * Test that directories that do not exist product an error code.
    */
   public function testDirectoriesThatDoNotExistProduceErrorCode()
@@ -23,7 +56,7 @@ class ConfigSplitMergeTest extends TestCase
       $commandTester = new CommandTester($command);
       $commandTester->execute([
         'parent' => 'foo',
-        'sibling' => 'bar',
+        'children' => 'bar',
         '--config' => __DIR__ . '/data/monkey',
       ]);
 
@@ -61,7 +94,7 @@ class ConfigSplitMergeTest extends TestCase
     $commandTester = new CommandTester($command);
     $commandTester->execute([
       'parent' => 'parent',
-      'sibling' => 'sibling',
+      'children' => 'child1',
       '--config' => __DIR__ . '/data/config',
     ]);
 
@@ -73,15 +106,15 @@ class ConfigSplitMergeTest extends TestCase
     $this->assertEquals(0, $statusCode);
 
     $this->assertFileExists(__DIR__ . '/data/config/default/config_split.config_split.parent.yml');
-    $this->assertFileExists(__DIR__ . '/data/config/default/config_split.config_split.sibling.yml');
+    $this->assertFileExists(__DIR__ . '/data/config/default/config_split.config_split.child1.yml');
     $this->assertFileExists(__DIR__ . '/data/config/default/node.type.landing_page.yml');
 
     $this->assertFileNotExists(__DIR__ . '/data/config/parent/node.type.landing_page.yml');
     $this->assertFileExists(__DIR__ . '/data/config/parent/node.type.page.yml');
     $this->assertFileExists(__DIR__ . '/data/config/parent/system.site.yml');
 
-    $this->assertFileNotExists(__DIR__ . '/data/config/sibling/node.type.landing_page.yml');
-    $this->assertFileExists(__DIR__ . '/data/config/sibling/system.site.yml');
+    $this->assertFileNotExists(__DIR__ . '/data/config/child1/node.type.landing_page.yml');
+    $this->assertFileExists(__DIR__ . '/data/config/child1/system.site.yml');
 
     $this->assertContains("'node.type.landing_page' => '2034e796-4d2c-43f0-9135-1afc93052380',", $output, '');
 
@@ -90,11 +123,61 @@ class ConfigSplitMergeTest extends TestCase
     $configSplit = Yaml::decode($configSplitFileContents);
     $this->assertEquals($configSplit['blacklist'][0], 'node.type.page');
 
-    $configSplitFile = __DIR__ . '/data/config/default/config_split.config_split.sibling.yml';
+    $configSplitFile = __DIR__ . '/data/config/default/config_split.config_split.child1.yml';
     $configSplitFileContents = file_get_contents($configSplitFile);
     $configSplit = Yaml::decode($configSplitFileContents);
     $this->assertFalse(isset($configSplit['blacklist'][0]));
   }
+
+  /**
+   * Test that the config split merge performs the correct merge operation with
+   * more than one child.
+   */
+  public function testConfigSplitMergePerformsMultipleChildMerge() {
+    $this->setupConfigTest('configtest');
+
+    $application = new Application();
+    $application->add(new ConfigSplitMerge());
+
+    $command = $application->find('drupal:config_split_merge');
+    $commandTester = new CommandTester($command);
+    $commandTester->execute([
+      'parent' => 'parent',
+      'children' => 'child1,child2',
+      '--config' => __DIR__ . '/data/config',
+    ]);
+
+    $output = $commandTester->getDisplay();
+
+    $this->assertContains('Done', $output);
+
+    $statusCode = $commandTester->getStatusCode();
+    $this->assertEquals(0, $statusCode);
+
+    $this->assertFileExists(__DIR__ . '/data/config/default/config_split.config_split.parent.yml');
+    $this->assertFileExists(__DIR__ . '/data/config/default/config_split.config_split.child1.yml');
+    $this->assertFileExists(__DIR__ . '/data/config/default/node.type.landing_page.yml');
+
+    $this->assertFileNotExists(__DIR__ . '/data/config/parent/node.type.landing_page.yml');
+    $this->assertFileExists(__DIR__ . '/data/config/parent/node.type.page.yml');
+    $this->assertFileExists(__DIR__ . '/data/config/parent/system.site.yml');
+
+    $this->assertFileNotExists(__DIR__ . '/data/config/child1/node.type.landing_page.yml');
+    $this->assertFileExists(__DIR__ . '/data/config/child1/system.site.yml');
+
+    $this->assertContains("'node.type.landing_page' => '2034e796-4d2c-43f0-9135-1afc93052380',", $output, '');
+
+    $configSplitFile = __DIR__ . '/data/config/default/config_split.config_split.parent.yml';
+    $configSplitFileContents = file_get_contents($configSplitFile);
+    $configSplit = Yaml::decode($configSplitFileContents);
+    $this->assertEquals($configSplit['blacklist'][0], 'node.type.page');
+
+    $configSplitFile = __DIR__ . '/data/config/default/config_split.config_split.child1.yml';
+    $configSplitFileContents = file_get_contents($configSplitFile);
+    $configSplit = Yaml::decode($configSplitFileContents);
+    $this->assertFalse(isset($configSplit['blacklist'][0]));
+  }
+
 
   /**
    * Set up the configuration test by copying one of the test configuration
@@ -157,6 +240,16 @@ class ConfigSplitMergeTest extends TestCase
       }
     }
     return rmdir($directory);
+  }
+
+  /**
+   * PHPUnit teardown funciton.
+   */
+  public function tearDown() {
+    if (file_exists(__DIR__ . '/data/config')) {
+      // Remove the config testing directory after a test.
+      $this->recurseDeleteDirectory(__DIR__ . '/data/config');
+    }
   }
 
 }

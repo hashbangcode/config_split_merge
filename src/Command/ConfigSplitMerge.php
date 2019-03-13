@@ -17,6 +17,11 @@ use Drupal\Core\Serialization\Yaml;
  */
 class ConfigSplitMerge extends Command
 {
+  /**
+   * The name of the command.
+   *
+   * @var string
+   */
   protected static $defaultName = 'drupal:config_split_merge';
 
   /**
@@ -48,6 +53,34 @@ class ConfigSplitMerge extends Command
   protected $updateUuidList;
 
   /**
+   * The parent config directory.
+   *
+   * @var string
+   */
+  protected $parentConfig;
+
+  /**
+   * The children config directories.
+   *
+   * @var array
+   */
+  protected $childrenConfig;
+
+  /**
+   * The list of configuration files that need to be deleted.
+   *
+   * @var array
+   */
+  protected $filesToDelete;
+
+  /**
+   * The list of configuration files that need to be copied.
+   *
+   * @var array
+   */
+  protected $filesToCopy;
+
+  /**
    * Configure the command.
    */
   protected function configure()
@@ -56,24 +89,19 @@ class ConfigSplitMerge extends Command
       ->setDescription('Merges configurations.')
       ->setHelp('This command will take multiple configurations and merge them together.')
       ->addArgument('parent', InputArgument::REQUIRED, 'Parent Config')
-      ->addArgument('sibling', InputArgument::REQUIRED, 'Sibling Config')
+      ->addArgument('children', InputArgument::REQUIRED, 'Children Config')
       ->addOption('config', 'c', InputOption::VALUE_REQUIRED, 'Set the config directory root.', 'config')
       ->addOption('update-hook-file', 'u', InputOption::VALUE_REQUIRED, 'Where to write the update hook to.', FALSE)
       ->addOption('dry-run', 'd', InputOption::VALUE_NONE, 'Dry run.');
   }
 
   /**
-   * Execute the command.
+   * Extract the input of the command and convert this to object properties.
    *
    * @param InputInterface $input
    *   The input object.
-   * @param OutputInterface $output
-   *   The output object.
-   * @return int|null
-   *   The return.
    */
-  protected function execute(InputInterface $input, OutputInterface $output)
-  {
+  protected function extractAndSetOptions($input) {
     if ($input->hasOption('config')) {
       $this->configDirectory = $input->getOption('config');
     } else {
@@ -88,20 +116,55 @@ class ConfigSplitMerge extends Command
 
     $this->dryRun = $input->getOption('dry-run');
 
+    $this->parentConfig = $input->getArgument('parent');
+    $this->childrenConfig = $this->extractChildren($input->getArgument('children'));
+  }
+
+  /**
+   * Extract the children parameter into an array.
+   *
+   * @param string $children
+   *   The comma separated list of children.
+   *
+   * @return array
+   *   The extracted list of children.
+   */
+  public function extractChildren($children) {
+    $children = explode(',', $children);
+    $children = array_filter($children);
+    foreach ($children as $id => $child) {
+      $children[$id] = trim($child);
+    }
+    sort($children);
+    return $children;
+  }
+
+  /**
+   * Execute the command.
+   *
+   * @param InputInterface $input
+   *   The input object.
+   * @param OutputInterface $output
+   *   The output object.
+   * @return int|null
+   *   The return.
+   */
+  protected function execute(InputInterface $input, OutputInterface $output)
+  {
+    $this->extractAndSetOptions($input);
+
     if ($this->dryRun) {
-      $output->writeln('<comment>Performing dry run.</comment>');
+      $output->writeln('<comment>Performing dry run. No files will be changed.</comment>');
     }
 
-    $this->parentConfig = $input->getArgument('parent');
-    $this->siblingConfig = $input->getArgument('sibling');
+    if ($output->isVerbose()) {
+      $output->writeln('<comment>Verbose mode is on!</comment>');
+    }
 
     $destinationDirectory = $this->configDirectory . '/default';
 
     $parentDirectory = $this->configDirectory . '/' . $this->parentConfig;
-    $siblingDirectory = $this->configDirectory . '/' . $this->siblingConfig;
-
     $parentConfigSplitFile = $destinationDirectory . '/config_split.config_split.' . $this->parentConfig . '.yml';
-    $siblingConfigSplitFile = $destinationDirectory . '/config_split.config_split.' . $this->siblingConfig . '.yml';
 
     if (!file_exists($parentDirectory)) {
       $output->writeln('<error>Parent directory ' . $parentDirectory . ' does not exist.</error>');
@@ -109,114 +172,166 @@ class ConfigSplitMerge extends Command
       return 1;
     }
 
-    // Set up the config type lists.
+    // Load all of the files in the parent directory to check them.
+    $parentFiles = array_diff(scandir($parentDirectory), array('..', '.'));
+
+    // Set up the config type lists for parent.
     $parentBlacklist = [];
     $parentGraylist = [];
-    $siblingBlacklist = [];
-    $siblingGraylist = [];
 
-    // Load all of the files in the parent directory to check them.
-    $files = array_diff(scandir($parentDirectory), array('..', '.'));
+    foreach ($this->childrenConfig as $childConfig) {
+      $childDirectory = $this->configDirectory . '/' . $childConfig;
+      $childConfigSplitFile = $destinationDirectory . '/config_split.config_split.' . $childConfig . '.yml';
 
-    foreach ($files as $filename) {
-      // Check to see if we have a yml file.
-      if (strstr($filename, '.yml') !== FALSE) {
+      // Set up the config type lists for parent this child.
+      $childBlacklist = [];
+      $childGraylist = [];
 
-        // Extract the configuration name.
-        $configName = str_replace('.yml', '', $filename);
+      foreach ($parentFiles as $filename) {
+        // Check to see if we have a yml file.
+        if (strstr($filename, '.yml') !== FALSE) {
+          // Extract the configuration item name.
+          $configName = str_replace('.yml', '', $filename);
 
-        if (file_exists($siblingDirectory . '/' . $filename)) {
-          // File also exists in the sibling directory.
-          // Get the contents of both of the files.
-          $parentFileContents = file_get_contents($parentDirectory . '/' . $filename);
-          $parentArray = Yaml::decode($parentFileContents);
-          $siblingFileContents = file_get_contents($siblingDirectory . '/' . $filename);
-          $siblingArray = Yaml::decode($siblingFileContents);
+          if (file_exists($childDirectory . '/' . $filename) && file_exists($parentDirectory . '/' . $filename)) {
+            // File also exists in the children directory.
+            // Get the contents of both of the files.
+            $parentConfigItemFileContents = file_get_contents($parentDirectory . '/' . $filename);
+            $parentArray = Yaml::decode($parentConfigItemFileContents);
+            $childConfigItemFileContents = file_get_contents($childDirectory . '/' . $filename);
+            $childConfigItemArray = Yaml::decode($childConfigItemFileContents);
 
-          // Calculate the difference between the two files.
-          $difference = \Drupal\Component\Utility\DiffArray::diffAssocRecursive($parentArray, $siblingArray);
+            // Calculate the difference between the two files.
+            $difference = \Drupal\Component\Utility\DiffArray::diffAssocRecursive($parentArray, $childConfigItemArray);
 
-          if (count($difference) == 1 && isset($difference['uuid'])) {
-            // If we have exactly 1 difference and that difference is the uuid then process it.
-            // Extract the uuid from the parent and write this to a file.
-            $uuid = $parentArray['uuid'];
+            if (count($difference) == 1 && isset($difference['uuid'])) {
+              // If we have exactly 1 difference and that difference is the uuid then process it.
+              // Extract the uuid from the parent and write this to a file.
+              $uuid = $parentArray['uuid'];
 
-            $updateUuidList[$configName] = $uuid;
-            if (!$this->dryRun) {
+              $updateUuidList[$configName] = $uuid;
+
               // Copy the parent file to the destination directory.
-              copy($parentDirectory . '/' . $filename, $destinationDirectory . '/' . $filename);
+              $this->addCopyFile($parentDirectory . '/' . $filename, $destinationDirectory . '/' . $filename);
+
+                // Delete both of the files.
+              $this->filesToDelete[] = $parentDirectory . '/' . $filename;
+              $this->filesToDelete[] = $childDirectory . '/' . $filename;
+            }
+            elseif (count($difference) > 0 && !isset($difference['uuid'])) {
+              // This is not a uuid change and as it's different we just need to gray list and copy this version to
+              // the default config.
+              $parentGraylist[] = $configName;
+              $childGraylist[] = $configName;
+              $this->addCopyFile($parentDirectory . '/' . $filename, $destinationDirectory . '/' . $filename);
+            }
+            elseif (count($difference) == 0) {
+              // If we have exactly no difference between the two files then just move it.
+              // Copy the parent file to the destination directory.
+              $this->addCopyFile($parentDirectory . '/' . $filename, $destinationDirectory . '/' . $filename);
 
               // Delete both of the files.
-              unlink($parentDirectory . '/' . $filename);
-              unlink($siblingDirectory . '/' . $filename);
-            }
-          } elseif (count($difference) > 0 && !isset($difference['uuid'])) {
-            // This is not a uuid change and as it's different we just need to gray list and copy this version to
-            // the default config.
-            $parentGraylist[] = $configName;
-            $siblingGraylist[] = $configName;
-            if (!$this->dryRun) {
-              copy($parentDirectory . '/' . $filename, $destinationDirectory . '/' . $filename);
-            }
-          } elseif (count($difference) == 0) {
-            // If we have exactly no difference between the two files then just move it.
-            // Copy the parent file to the destination directory.
-            if (!$this->dryRun) {
-              copy($parentDirectory . '/' . $filename, $destinationDirectory . '/' . $filename);
-
-              // Delete both of the files.
-              unlink($parentDirectory . '/' . $filename);
-              unlink($siblingDirectory . '/' . $filename);
+              $this->filesToDelete[] = $parentDirectory . '/' . $filename;
+              $this->filesToDelete[] = $childDirectory . '/' . $filename;
             }
           }
-        } else {
-          // Config doesn't exist in sibling, make sure it doesn't also exist in the default configuration.
-          if (!file_exists($destinationDirectory . '/' . $filename)) {
-            // Add it to blacklist.
-            $parentBlacklist[] = $configName;
+          else {
+            // Config doesn't exist in child, make sure it doesn't also exist in the default configuration.
+            if (!file_exists($destinationDirectory . '/' . $filename)) {
+              // Add it to blacklist.
+              $parentBlacklist[] = $configName;
+            }
           }
         }
+      }
+
+      // Run the same checks on the child directory.
+      $files = array_diff(scandir($childDirectory), array('..', '.'));
+
+      foreach ($files as $filename) {
+        // Check to see if we have a yml file.
+        if (strstr($filename, '.yml') !== FALSE) {
+          // Extract the configuration name.
+          $configName = str_replace('.yml', '', $filename);
+
+          if (!file_exists($parentDirectory . '/' . $filename)) {
+            if (!file_exists($destinationDirectory . '/' . $filename)) {
+              $childBlacklist[] = $configName;
+            }
+          }
+        }
+      }
+
+      if (count($childBlacklist) > 0 || count($childGraylist) > 0 && !$this->dryRun) {
+        $this->updateConfigurationSplitFile($childConfigSplitFile, $childBlacklist, $childGraylist);
       }
     }
 
-    // Run the same checks on the sibling directory.
-    $files = array_diff(scandir($siblingDirectory), array('..', '.'));
+    if ($output->isVerbose()) {
+      $output->writeln(print_r($this->filesToDelete));
+      $output->writeln(print_r($this->filesToCopy));
+    }
 
-    foreach ($files as $filename) {
-      // Check to see if we have a yml file.
-      if (strstr($filename, '.yml') !== FALSE) {
-        // Extract the configuration name.
-        $configName = str_replace('.yml', '', $filename);
-
-        if (!file_exists($parentDirectory . '/' . $filename)) {
-          if (!file_exists($destinationDirectory . '/' . $filename)) {
-            $siblingBlacklist[] = $configName;
-          }
-        }
-      }
+    if (!$this->dryRun) {
+      // We have finished analysis of the config files, perform any file
+      // operations. We only do this if this is NOT a dry run. The copy
+      // operation must happen first.
+      $this->copyConfigFiles();
+      $this->deleteConfigFiles();
     }
 
     // Export the data to our config split files.
-    if (count($parentBlacklist) > 0 || count($parentGraylist) > 0) {
+    if (count($parentBlacklist) > 0 || count($parentGraylist) > 0 && !$this->dryRun) {
       $this->updateConfigurationSplitFile($parentConfigSplitFile, $parentBlacklist, $parentGraylist);
     }
 
-    if (count($siblingBlacklist) > 0 || count($siblingGraylist) > 0) {
-      $this->updateConfigurationSplitFile($siblingConfigSplitFile, $siblingBlacklist, $siblingGraylist);
-    }
-
+    // Set the update uuid list and generate the hook.
     $this->setUpdateUuidList($updateUuidList);
-
     $updateHook = $this->generateUpdateHook();
 
     if ($this->updateHookFile == FALSE) {
       $output->writeln($updateHook);
-    } else {
+    }
+    else {
       file_put_contents($this->updateHookFile, implode(PHP_EOL, $updateHook));
     }
 
     $output->writeln('<info>Done</info>');
     return 0;
+  }
+
+  /**
+   * Helper function to delete config files.
+   */
+  protected function deleteConfigFiles()
+  {
+    foreach ($this->filesToDelete as $file) {
+      if (file_exists($file)) {
+        unlink($file);
+      }
+    }
+  }
+
+  /**
+   * Helper function to copy config files.
+   */
+  protected function copyConfigFiles()
+  {
+    foreach ($this->filesToCopy as $file) {
+      if (file_exists($file['source'])) {
+        copy($file['source'], $file['destination']);
+      }
+    }
+  }
+
+  /**
+   * Helper function to allow the easy update of the copy array.
+   */
+  protected function addCopyFile($source, $destination) {
+    $this->filesToCopy[] = [
+      'source' => $source,
+      'destination' => $destination,
+    ];
   }
 
   /**
