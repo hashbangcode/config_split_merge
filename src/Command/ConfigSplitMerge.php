@@ -9,6 +9,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 use Drupal\Core\Serialization\Yaml;
+use Drupal\Component\Utility\DiffArray;
 
 /**
  * Class ConfigSplitMerge.
@@ -140,6 +141,40 @@ class ConfigSplitMerge extends Command
   }
 
   /**
+   * Extract a yaml structure from a file.
+   *
+   * @param string $config
+   *   The config file to extract.
+   *
+   * @return array
+   *   The extracted yaml contents.
+   */
+  public function extractConfigYamlFile($config) {
+    $configFileContents = file_get_contents($config);
+    return Yaml::decode($configFileContents);
+  }
+
+  /**
+   * Get the difference between two configuration yaml files.
+   *
+   * @param string $config1
+   *   Config yaml file 1.
+   * @param string $config2
+   *   Config yaml file 1.
+   *
+   * @return array
+   *   The difference array.
+   */
+  public function getConfigYamlFileDifference($config1, $config2) {
+    // Extract the two yaml files.
+    $config1Array = $this->extractConfigYamlFile($config1);
+    $config2Array = $this->extractConfigYamlFile($config2);
+
+    // Calculate and return the difference between the two arrays.
+    return DiffArray::diffAssocRecursive($config1Array, $config2Array);
+  }
+
+  /**
    * Execute the command.
    *
    * @param InputInterface $input
@@ -186,6 +221,7 @@ class ConfigSplitMerge extends Command
       // Set up the config type lists for parent this child.
       $childBlacklist = [];
       $childGraylist = [];
+      $childModulesList = [];
 
       foreach ($parentFiles as $filename) {
         // Check to see if we have a yml file.
@@ -193,20 +229,26 @@ class ConfigSplitMerge extends Command
           // Extract the configuration item name.
           $configName = str_replace('.yml', '', $filename);
 
-          if (file_exists($childDirectory . '/' . $filename) && file_exists($parentDirectory . '/' . $filename)) {
-            // File also exists in the children directory.
-            // Get the contents of both of the files.
-            $parentConfigItemFileContents = file_get_contents($parentDirectory . '/' . $filename);
-            $parentArray = Yaml::decode($parentConfigItemFileContents);
-            $childConfigItemFileContents = file_get_contents($childDirectory . '/' . $filename);
-            $childConfigItemArray = Yaml::decode($childConfigItemFileContents);
+          if ($configName == 'core.extension') {
+            // This is a special instance of core.extension. We need to add this
+            // file to the default config store and remove it from the parent.
+            $this->filesToDelete[] = $parentDirectory . '/' . $filename;
+            $this->addCopyFile($parentDirectory . '/' . $filename, $destinationDirectory . '/' . $filename);
 
-            // Calculate the difference between the two files.
-            $difference = \Drupal\Component\Utility\DiffArray::diffAssocRecursive($parentArray, $childConfigItemArray);
+            // We then skip the file analysis in the parent as this will be
+            // covered in the child.
+            continue;
+          }
+
+          if (file_exists($childDirectory . '/' . $filename) && file_exists($parentDirectory . '/' . $filename)) {
+            // File also exists in the children directory, get the difference
+            // between the two config files.
+            $difference = $this->getConfigYamlFileDifference($parentDirectory . '/' . $filename, $childDirectory . '/' . $filename);
 
             if (count($difference) == 1 && isset($difference['uuid'])) {
               // If we have exactly 1 difference and that difference is the uuid then process it.
               // Extract the uuid from the parent and write this to a file.
+              $parentArray = $this->extractConfigYamlFile($parentDirectory . '/' . $filename);
               $uuid = $parentArray['uuid'];
 
               $updateUuidList[$configName] = $uuid;
@@ -254,6 +296,20 @@ class ConfigSplitMerge extends Command
           // Extract the configuration name.
           $configName = str_replace('.yml', '', $filename);
 
+          if ($configName == 'core.extension') {
+            // This is a special instance of core.extension. We need to figure
+            // out what modules are different and then add these modules to the
+            // modules list for config split.
+            $difference = $this->getConfigYamlFileDifference($childDirectory . '/' . $filename, $parentDirectory . '/' . $filename);
+            if (count($difference) >= 1 && isset($difference['module'])) {
+              $childModulesList = $difference['module'];
+            }
+
+            // We then remove the core.extension.yml file the child.
+            $this->filesToDelete[] = $childDirectory . '/' . $filename;
+            continue;
+          }
+
           if (!file_exists($parentDirectory . '/' . $filename)) {
             if (!file_exists($destinationDirectory . '/' . $filename)) {
               $childBlacklist[] = $configName;
@@ -262,9 +318,9 @@ class ConfigSplitMerge extends Command
         }
       }
 
-      if (count($childBlacklist) > 0 || count($childGraylist) > 0 && !$this->dryRun) {
-        $this->updateConfigurationSplitFile($childConfigSplitFile, $childBlacklist, $childGraylist);
-      }
+      //if (count($childBlacklist) > 0 || count($childGraylist) > 0 && !$this->dryRun) {
+      $this->updateConfigurationSplitFile($childConfigSplitFile, $childBlacklist, $childGraylist, $childModulesList);
+      //}
     }
 
     if ($output->isVerbose()) {
@@ -343,11 +399,18 @@ class ConfigSplitMerge extends Command
    *   The black list.
    * @param array $graylist
    *   They gray list.
+   * @param array $modulelist
+   *   They module list (optional).
    */
-  public function updateConfigurationSplitFile($configSplitFile, $blacklist, $graylist)
+  public function updateConfigurationSplitFile($configSplitFile, $blacklist, $graylist, $modulelist = [])
   {
     $configSplitFileContents = file_get_contents($configSplitFile);
     $configSplit = Yaml::decode($configSplitFileContents);
+
+    if (count($modulelist) > 0) {
+      $configSplit['module'] = array_merge($configSplit['module'], $modulelist);
+      ksort($configSplit['module']);
+    }
 
     if (count($blacklist) > 0) {
       $configSplit['blacklist'] = array_unique(array_merge($configSplit['blacklist'], $blacklist));
