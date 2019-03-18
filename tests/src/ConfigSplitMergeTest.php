@@ -67,6 +67,57 @@ class ConfigSplitMergeTest extends TestCase
   }
 
   /**
+   * Test that performing a dry run doesn't change any files in config.
+   */
+  public function testPerformingDryRunDoesNothing()
+  {
+    $this->setupConfigTest('configtest');
+
+    $application = new Application();
+    $application->add(new ConfigSplitMerge());
+
+    $command = $application->find('drupal:config_split_merge');
+    $commandTester = new CommandTester($command);
+    $commandTester->execute([
+      'parent' => 'parent',
+      'children' => 'child1',
+      '--config' => __DIR__ . '/data/config',
+      '--dry-run' => TRUE,
+    ]);
+
+    $output = $commandTester->getDisplay();
+
+    $this->assertContains('Done', $output);
+
+    $statusCode = $commandTester->getStatusCode();
+    $this->assertEquals(0, $statusCode);
+
+    $this->assertFileExists(__DIR__ . '/data/config/default/config_split.config_split.parent.yml');
+    $this->assertFileExists(__DIR__ . '/data/config/default/config_split.config_split.child1.yml');
+    $this->assertFileExists(__DIR__ . '/data/config/default/config_split.config_split.child2.yml');
+
+    $originalFile = __DIR__ . '/data/configtest/default/config_split.config_split.parent.yml';
+    $this->assertFileEquals($originalFile, __DIR__ . '/data/config/default/config_split.config_split.parent.yml');
+
+    // These two files should not exist in default.
+    $this->assertFileNotExists(__DIR__ . '/data/config/default/node.type.landing_page.yml');
+    $this->assertFileNotExists(__DIR__ . '/data/config/default/core.extension.yml');
+
+    // All of the files should be in their original places.
+    $this->assertFileExists(__DIR__ . '/data/config/parent/core.extension.yml');
+    $this->assertFileExists(__DIR__ . '/data/config/parent/node.type.landing_page.yml');
+    $this->assertFileExists(__DIR__ . '/data/config/parent/node.type.page.yml');
+    $this->assertFileExists(__DIR__ . '/data/config/parent/system.site.yml');
+
+    $this->assertFileExists(__DIR__ . '/data/config/child1/core.extension.yml');
+    $this->assertFileExists(__DIR__ . '/data/config/child1/node.type.landing_page.yml');
+    $this->assertFileExists(__DIR__ . '/data/config/child1/system.site.yml');
+    $this->assertFileExists(__DIR__ . '/data/config/child2/core.extension.yml');
+    $this->assertFileExists(__DIR__ . '/data/config/child2/node.type.landing_page.yml');
+    $this->assertFileExists(__DIR__ . '/data/config/child2/system.site.yml');
+  }
+
+  /**
    * Test that the update hook output is correctly generated.
    */
   public function testUpdateHookOutput() {
@@ -180,7 +231,8 @@ class ConfigSplitMergeTest extends TestCase
     $configSplitFile = __DIR__ . '/data/config/default/config_split.config_split.parent.yml';
     $configSplitFileContents = file_get_contents($configSplitFile);
     $configSplit = Yaml::decode($configSplitFileContents);
-    $this->assertEquals($configSplit['blacklist'][0], 'node.type.page');
+    $this->assertEquals($configSplit['blacklist'][0], 'node.type.article');
+    $this->assertEquals($configSplit['blacklist'][1], 'node.type.page');
 
     $configSplitFile = __DIR__ . '/data/config/default/config_split.config_split.child1.yml';
     $configSplitFileContents = file_get_contents($configSplitFile);
