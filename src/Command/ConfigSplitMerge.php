@@ -408,11 +408,16 @@ class ConfigSplitMerge extends Command
     }
     $output[] = '  ];';
     $output[] = '';
+    $output[] = '  $configFactory = \Drupal::service(\'config.factory\');';
+    $output[] = '';
     $output[] = '  foreach ($fieldChanges as $field => $uuid) {';
-    $output[] = '    $config = \Drupal::service(\'config.factory\')->getEditable($field);';
-    $output[] = '    $config->set(\'uuid\', $uuid)->save();';
+    $output[] = '    if ($configFactory->loadMultiple([$field])) {';
+    $output[] = '      $config = $configFactory->getEditable($field);';
+    $output[] = '      $config->set(\'uuid\', $uuid)->save();';
+    $output[] = '    }';
     $output[] = '  }';
     $output[] = '}';
+    $output[] = '';
 
     return $output;
   }
