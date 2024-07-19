@@ -3,7 +3,7 @@ Config Split Merge
 
 A tool to merge together separate configurations for Drupal 8 sites.
 
-Taking a primary configuration this tool will analise the configuration available and perform the following actions.
+Taking a primary configuration this tool will analyse the configuration available and perform the following actions.
 
 - If the configuration exists in the primary and not in the secondary then leave it alone and add it to the primary 
 config split blacklist.
@@ -14,6 +14,8 @@ configuration split grey list for both sites and make a copy in the default conf
 - If the configuration exists in both sites, contains a single difference, and that difference is just the uuid, then
 copy the primary configuration to the default configuration area and delete the sibling configuration file. This step 
 also generates output in the form of a update hook that can be used to update the uuid for all sites.
+
+The tool doesn't understand Drupal configuration, just the YAML structure that it contains.
 
 Install
 -------
